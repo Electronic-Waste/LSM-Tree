@@ -12,12 +12,29 @@ KVStore::~KVStore()
 
 }
 
+bool KVStore::isOverflow(uint64_t key, const std::string &str)
+{
+	int size = mem->getByteSize();
+	std::string pStr = mem->get(key);
+	/* Not Found */
+	if (pStr == "") {
+		return size + str.length() + 12 > MAX_BYTE;
+	}
+	/* Found */
+	else {
+		return size + str.length() - pStr.length() > MAX_BYTE;
+	}
+}
+
 /**
  * Insert/Update the key-value pair.
  * No return values for simplicity.
  */
 void KVStore::put(uint64_t key, const std::string &s)
 {
+	if (isOverflow(key, s)) {
+		mem->reset();
+	}
 	mem->put(key, s);
 }
 /**
@@ -34,7 +51,11 @@ std::string KVStore::get(uint64_t key)
  */
 bool KVStore::del(uint64_t key)
 {
-	return mem->del(key);
+	std::string getStr = mem->get(key);
+	/* Key Found In MemTable*/
+	if (getStr != "" && getStr != "~DELETE~")
+		return mem->del(key);
+	return false;
 }
 
 /**

@@ -18,13 +18,7 @@ int MemTable::randomLevel()
     return result;
 }
 
-bool MemTable::isToOverflow(const std::string &str)
-{
-    int strSize = str.length() + 1;
-    return strSize + 12 + byteSize > MAX_BYTE;
-}
-
-std::string MemTable::transIntoSSTable()
+void MemTable::transIntoSSTable(const std::string &input_path)
 {
 
 }
@@ -124,5 +118,17 @@ void MemTable::scan(uint64_t key1, uint64_t key2, std::list<std::pair<uint64_t, 
     while (p->key <= key2) {
         list.push_back(std::pair<uint64_t, std::string>(p->key, p->val));
         p = p->forwards[0];
+    }
+}
+
+void MemTable::deleteTable()
+{
+    /* Make MemTable empty */
+    MemNode *p1 = head;
+    MemNode *p2;
+    while (p1) {
+        p2 = p1->forwards[0];
+        delete p1;
+        p1 = p2;
     }
 }

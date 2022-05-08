@@ -42,8 +42,7 @@ class MemTable
         unsigned long long s = 1;
         double my_rand();
         int randomLevel();
-        bool isToOverflow(const std::string &str);
-        std::string transIntoSSTable();
+        void transIntoSSTable(const std::string &input_path);
 
 public:
     MemTable() {
@@ -67,5 +66,8 @@ public:
 
     void scan(uint64_t key1, uint64_t key2, std::list<std::pair<uint64_t, std::string>> &list);
 
+    int getByteSize(){return byteSize;}
+
+    void deleteTable();
 
 };

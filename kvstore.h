@@ -7,6 +7,8 @@ class KVStore : public KVStoreAPI {
 	// You can add your implementation here
 private:
 	MemTable *mem;
+
+	bool isOverflow(uint64_t key, const std::string &str);
 public:
 	KVStore(const std::string &dir);
 
