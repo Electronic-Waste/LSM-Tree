@@ -1,3 +1,5 @@
+#include <cstring>
+
 #include "bloomfilter.h"
 
 BloomFilter::BloomFilter()
@@ -31,4 +33,11 @@ bool BloomFilter::isFind(uint64_t key)
     }
     return flag;
 
+}
+
+char *BloomFilter::returnData()
+{
+    char *retData = new char[CAPACITY];
+    strncpy(retData, data, CAPACITY);
+    return retData;
 }

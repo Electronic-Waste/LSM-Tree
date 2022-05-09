@@ -2,11 +2,14 @@
 
 #include "kvstore_api.h"
 #include "memtable.h"
+#include "sstable.h"
 
 class KVStore : public KVStoreAPI {
 	// You can add your implementation here
 private:
 	MemTable *mem;
+
+	std::vector<SSTable *> SSVec;
 
 	bool isOverflow(uint64_t key, const std::string &str);
 public:
@@ -23,4 +26,6 @@ public:
 	void reset() override;
 
 	void scan(uint64_t key1, uint64_t key2, std::list<std::pair<uint64_t, std::string> > &list) override;
+
+	void display();
 };

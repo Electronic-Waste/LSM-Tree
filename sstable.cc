@@ -2,6 +2,7 @@
 #include <fstream>
 
 #include "sstable.h"
+#include "utils.h"
 
 /**
  * Get value string according to key
@@ -10,30 +11,45 @@
  */
 std::string SSTable::get(uint64_t key)
 {
-    char c;
     uint32_t offset;
     uint32_t len = 0;
-    char buf[512];
+    char *buf;
     std::ifstream out;
 
+    /* Key out of range */
+    if (key < header->minKey || key > header->maxKey) return "";
     /* Not Found in BloomFilter */
-    if (bf->isFind(key) == false) return "";
+    else if (bf->isFind(key) == false) return "";
     /* Not Found in Dic */
     else if (getOffSet(key, offset, len) == false) return "";
     /* Found in Dic */
     else {
-        out.open(file_path);
+        out.open(file_path, std::ios::in | std::ios::binary);
         out.seekg(offset, out.beg);
         /* Value locate in the end of file */
-        if (len == 0) 
-            out.read(buf, out.end - offset);
+        if (len == 0) {
+            uint32_t fileSize;
+            out.seekg(0, out.end);
+            fileSize = out.tellg();
+            out.seekg(offset, out.beg);
+            buf = new char[fileSize - offset + 1];
+            out.read(buf, fileSize - offset);
+            buf[fileSize - offset] = '\0';
+        }
         /* Read value according to len */
-        else out.read(buf, len);
+        else {
+            buf = new char[len + 1];
+            out.read(buf, len);
+            buf[len] = '\0';
+        }
         out.close();
-        /* the value is "~DELETE", return "" */
-        if (buf == "~DELETE~") return "";
-        /* return value string */
-        else return buf;
+        /* the value is "~DELETE~", return "" */
+        if (strcmp(buf, "~DELETE~") == 0) return "";
+            /* return value string */
+        else {
+            std::string retStr(buf);
+            return retStr;
+        }
     }
 }
 
@@ -62,7 +78,25 @@ bool SSTable::getOffSet(uint64_t key, uint32_t &offset, uint32_t &len)
     /* Found: update offset, len; return true */
     else {
         offset = dic[mid].second;
-        len = dic[mid + 1].second - offset;
+        /* dic[mid] is the last element or not?
+         * true: len = 0; false: len = dic[mid + 1].second - offset */
+        if (mid != sizeOfDic - 1)
+            len = dic[mid + 1].second - offset;
         return true;
     }
 }
+
+/**
+ * @brief Clear the SSTable in cache and corresponding file in disk
+ */
+void SSTable::reset()
+{
+    delete header;
+    delete bf;
+    dic.clear();
+    utils::rmfile(file_path.c_str());
+}
+
+/**
+ * @brief Scan from K1 to K2
+ */

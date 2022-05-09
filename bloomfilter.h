@@ -13,6 +13,7 @@ public:
     ~BloomFilter();
     void insert(uint64_t key);
     bool isFind(uint64_t key);
+    char *returnData();
 
 };
 

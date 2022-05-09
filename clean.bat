@@ -1,0 +1,1 @@
+Del *.o *.exe Level*/

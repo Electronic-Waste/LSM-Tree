@@ -1,6 +1,8 @@
 #include "kvstore.h"
 #include "memtable.h"
 #include <string>
+#include <cmath>
+#include "utils.h"
 
 KVStore::KVStore(const std::string &dir): KVStoreAPI(dir)
 {
@@ -33,6 +35,16 @@ bool KVStore::isOverflow(uint64_t key, const std::string &str)
 void KVStore::put(uint64_t key, const std::string &s)
 {
 	if (isOverflow(key, s)) {
+		//printf("Yes\n");
+		int sizeOfSSVec = SSVec.size();
+		int level = log(sizeOfSSVec + 2) / log(2) - 1;		//dir level
+		std::string dirPath = "Level" + std::to_string(level);
+		std::string filePath = dirPath + "/sstable" + std::to_string(sizeOfSSVec) + ".sst";
+		/* Check if dir exits or not */
+		if (!utils::dirExists(dirPath)) {
+			utils::mkdir(dirPath.c_str());
+		}
+		mem->createSSTable(SSVec, filePath);
 		mem->reset();
 	}
 	mem->put(key, s);
@@ -43,7 +55,19 @@ void KVStore::put(uint64_t key, const std::string &s)
  */
 std::string KVStore::get(uint64_t key)
 {
-	return mem->get(key);
+	std::string getMemStr = mem->get(key);
+	if (getMemStr != "") {
+		return getMemStr;
+	}
+	else {
+		int size = SSVec.size();
+		for (int i = size - 1; i >= 0; --i) {
+			std::string retStr;
+			if ((retStr = SSVec[i]->get(key)) != "")
+				return retStr;
+		}
+	}
+	return "";
 }
 /**
  * Delete the given key-value pair if it exists.
@@ -53,8 +77,18 @@ bool KVStore::del(uint64_t key)
 {
 	std::string getStr = mem->get(key);
 	/* Key Found In MemTable*/
-	if (getStr != "" && getStr != "~DELETE~")
+	if (getStr != "")
 		return mem->del(key);
+	else {
+		int size = SSVec.size();
+		for (int i = size - 1; i >= 0; --i) {
+			std::string retStr;
+			if ((retStr = SSVec[i]->get(key)) != "") {
+				put(key, retStr);
+				return true;
+			}
+		}
+	}
 	return false;
 }
 
@@ -65,6 +99,17 @@ bool KVStore::del(uint64_t key)
 void KVStore::reset()
 {
 	mem->reset();
+	uint64_t size = SSVec.size();
+	//printf("size: %lld\n", size);
+	for (uint64_t i = 0; i < size; ++i) {
+		SSVec[i]->reset();
+	}
+	int currentLevel = log(size + 1) / log(2) - 1;
+	for (int i = 0; i < currentLevel; ++i) {
+		std::string dirPath = "Level" + std::to_string(i);
+		if (utils::dirExists(dirPath))
+			utils::rmdir(dirPath.c_str());
+	}
 }
 
 /**
@@ -75,4 +120,10 @@ void KVStore::reset()
 void KVStore::scan(uint64_t key1, uint64_t key2, std::list<std::pair<uint64_t, std::string> > &list)
 {	
 	mem->scan(key1, key2, list);
+}
+
+void KVStore::display()
+{
+	printf("MemTable ByteSize: %d\n", mem->getByteSize());
+	printf("SSTable Num: %lld", SSVec.size());
 }

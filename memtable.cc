@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 
 #include "memtable.h"
 
@@ -18,8 +19,42 @@ int MemTable::randomLevel()
     return result;
 }
 
-void MemTable::transIntoSSTable(const std::string &input_path)
+void MemTable::createSSTable(std::vector<SSTable *> &SSVec, std::string file_path)
 {
+    // printf("yes!\n");
+    uint64_t timeStamp = SSVec.size();
+    uint32_t offset = 10240 + 32;
+    SSInfo *header = new SSInfo(timeStamp, NumOfMemNode, minKey, maxKey);
+    BloomFilter *bf = new BloomFilter;
+    std::vector<std::pair<uint64_t, uint32_t>> dic;
+    // printf("yes!\n");
+    // printf("Byte Size: %d", byteSize);
+    MemNode *p = head->forwards[0];
+    while(p->type != MemNodeType::NIL) {
+        uint64_t key = p->key;
+        // printf("Key: %llu, Offset: %u\n", key, offset);
+        bf->insert(key);
+        dic.push_back(std::pair<uint64_t, uint32_t>(key, offset));
+        offset += p->val.length();
+        p = p->forwards[0];
+    }
+    SSTable *st = new SSTable(header, bf, dic, file_path);
+    SSVec.push_back(st);
+
+    // printf("yes!\n");
+    std::ofstream in;
+    in.open(file_path, std::ios::out | std::ios::binary);
+    // printf("yes!\n");
+    in.write((char *)&timeStamp, sizeof(uint64_t));
+    in.write((char *)&NumOfMemNode, sizeof(uint64_t));
+    in.write((char *)&minKey, sizeof(uint64_t));
+    in.write((char *)&maxKey, sizeof(uint64_t));
+    in.write(bf->returnData(), CAPACITY);
+    MemNode *q = head->forwards[0];
+    while (q->type != MemNodeType::NIL) {
+        in.write(q->val.c_str(), q->val.length());
+        q = q->forwards[0];
+    }
 
 }
 
@@ -93,16 +128,17 @@ bool MemTable::del(uint64_t key)
 void MemTable::reset()
 {
     /* Make MemTable empty */
-    MemNode *p1 = head;
-    MemNode *p2;
-    while (p1) {
-        p2 = p1->forwards[0];
-        delete p1;
-        p1 = p2;
-    }
+    deleteTable();
 
     /* Rebuild MemTable */
-    MemTable();
+    byteSize = 10240 + 32;
+    NumOfMemNode = 0;
+    minKey = UINT64_MAX;
+    maxKey = 0;
+    head = new MemNode(0, "", MemNodeType::HEAD);
+    tail = new MemNode(UINT64_MAX, "", MemNodeType::NIL);
+    for (int i = 0; i < MAX_LEVEL; ++i)
+        head->forwards[i] = tail;
 }
 
 void MemTable::scan(uint64_t key1, uint64_t key2, std::list<std::pair<uint64_t, std::string>> &list)

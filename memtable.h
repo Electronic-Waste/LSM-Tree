@@ -4,6 +4,7 @@
 #include <list>
 #include <string>
 #include <cstdint>
+#include "sstable.h"
 
 
 #define MAX_LEVEL 8
@@ -42,7 +43,6 @@ class MemTable
         unsigned long long s = 1;
         double my_rand();
         int randomLevel();
-        void transIntoSSTable(const std::string &input_path);
 
 public:
     MemTable() {
@@ -69,5 +69,7 @@ public:
     int getByteSize(){return byteSize;}
 
     void deleteTable();
+
+    void createSSTable(std::vector<SSTable *> &SSVec, std::string file_path);
 
 };

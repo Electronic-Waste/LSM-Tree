@@ -2,7 +2,6 @@
 #include <vector>
 
 #include "bloomfilter.h"
-#include "memtable.h"
 
 struct SSInfo
 {
@@ -24,8 +23,15 @@ private:
     std::string file_path;
     
 public:
-    SSTable(SSInfo *h, BloomFilter *b, std::vector<std::pair<uint64_t, uint32_t>> &d, const std::string &p)
-        : header(h), bf(b), dic(d), file_path(p) {}
+    SSTable(SSInfo *h, BloomFilter *b, const std::vector<std::pair<uint64_t, uint32_t>> &d, const std::string &p)
+        : header(h), bf(b), file_path(p) {
+            uint64_t size = d.size();
+            for (uint64_t i = 0; i < size; ++i) {
+                uint64_t key = d[i].first;
+                uint32_t offset = d[i].second;
+                dic.push_back(std::pair<uint64_t, uint32_t>(key, offset));
+            }
+        }
     
     ~SSTable(){
         delete header;
@@ -37,5 +43,8 @@ public:
 
     bool getOffSet(uint64_t key, uint32_t &offset, uint32_t &len);
 
+    void reset();
+
+    std::string returnPath(){return file_path;}
 };
 
