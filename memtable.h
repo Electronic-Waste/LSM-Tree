@@ -1,3 +1,6 @@
+#ifndef LSM_TREE_MEMTABLE_H
+#define LSM_TREE_MEMTABLE_H
+
 #pragma once
 
 #include <vector>
@@ -24,7 +27,7 @@ struct MemNode
     MemNodeType type;
     std::vector<MemNode *> forwards;
     MemNode(uint64_t _key, const std::string &_val, MemNodeType _type)
-        : key(_key), val(_val), type(_type)
+            : key(_key), val(_val), type(_type)
     {
         for (int i = 0; i < MAX_LEVEL; ++i)
             forwards.push_back(nullptr);
@@ -33,16 +36,16 @@ struct MemNode
 
 class MemTable
 {
-    private:
-        int byteSize;
-        int NumOfMemNode;
-        uint64_t minKey;
-        uint64_t maxKey;
-        MemNode *head;
-        MemNode *tail;
-        unsigned long long s = 1;
-        double my_rand();
-        int randomLevel();
+private:
+    int byteSize;
+    int NumOfMemNode;
+    uint64_t minKey;
+    uint64_t maxKey;
+    MemNode *head;
+    MemNode *tail;
+    unsigned long long s = 1;
+    double my_rand();
+    int randomLevel();
 
 public:
     MemTable() {
@@ -55,7 +58,7 @@ public:
         for (int i = 0; i < MAX_LEVEL; ++i)
             head->forwards[i] = tail;
     }
-    
+
     void put(uint64_t key, const std::string &val);
 
     std::string get(uint64_t key);
@@ -70,6 +73,9 @@ public:
 
     void deleteTable();
 
-    void createSSTable(std::vector<SSTable *> &SSVec, std::string file_path);
+    void createSSTable(std::vector<SSTable *> &SSVec, uint64_t timeStamp, const std::string &filePath);
 
 };
+
+
+#endif //LSM_TREE_MEMTABLE_H

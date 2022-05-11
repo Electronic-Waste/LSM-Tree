@@ -1,3 +1,7 @@
+#ifndef LSM_TREE_BLOOMFILTER_H
+#define LSM_TREE_BLOOMFILTER_H
+
+
 #pragma once
 #include "MurmurHash3.h"
 
@@ -10,6 +14,7 @@ private:
 
 public:
     BloomFilter();
+    BloomFilter(char *bf);
     ~BloomFilter();
     void insert(uint64_t key);
     bool isFind(uint64_t key);
@@ -17,3 +22,7 @@ public:
 
 };
 
+
+
+
+#endif //LSM_TREE_BLOOMFILTER_H

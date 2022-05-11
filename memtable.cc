@@ -3,12 +3,20 @@
 
 #include "memtable.h"
 
+/**
+ * @brief Used to generate random number
+ * @return Random number
+ */
 double MemTable::my_rand()
 {
     s = (16807 * s) % 2147483647ULL;
     return (s + 0.0) / 2147483647ULL;
 }
 
+/**
+ * @brief Generate a height for newly inserted node
+ * @return height of the node
+ */
 int MemTable::randomLevel()
 {
     int result = 1;
@@ -19,32 +27,38 @@ int MemTable::randomLevel()
     return result;
 }
 
-void MemTable::createSSTable(std::vector<SSTable *> &SSVec, std::string file_path)
+/**
+ * @brief Generate cache for SSTable and write the whole SSTable into disk.
+ * @param SSVec Cache for SSTable(Organized in array)
+ * @param timeStamp The time stamp that will be added to SSTable's header.
+ */
+void MemTable::createSSTable(std::vector<SSTable *> &SSVec, uint64_t timeStamp, const std::string &filePath)
 {
-    // printf("yes!\n");
-    uint64_t timeStamp = SSVec.size();
+     /* Initialize some variables used for generating cache and SSTable */
     uint32_t offset = 10240 + 32;
     SSInfo *header = new SSInfo(timeStamp, NumOfMemNode, minKey, maxKey);
     BloomFilter *bf = new BloomFilter;
     std::vector<std::pair<uint64_t, uint32_t>> dic;
-    // printf("yes!\n");
-    // printf("Byte Size: %d", byteSize);
+    std::string file_path;
+
+    /* Generate bloomfilter and dictionary part of SSTable */
     MemNode *p = head->forwards[0];
     while(p->type != MemNodeType::NIL) {
         uint64_t key = p->key;
-        // printf("Key: %llu, Offset: %u\n", key, offset);
         bf->insert(key);
         dic.push_back(std::pair<uint64_t, uint32_t>(key, offset));
         offset += p->val.length();
         p = p->forwards[0];
     }
+    /* Generate path for SSTable to store in (level0 at beginning) */
+    file_path = filePath;
+    /* Initialize cache for SSTable */
     SSTable *st = new SSTable(header, bf, dic, file_path);
     SSVec.push_back(st);
 
-    // printf("yes!\n");
+    /* Write SSTable to disk */
     std::ofstream in;
     in.open(file_path, std::ios::out | std::ios::binary);
-    // printf("yes!\n");
     in.write((char *)&timeStamp, sizeof(uint64_t));
     in.write((char *)&NumOfMemNode, sizeof(uint64_t));
     in.write((char *)&minKey, sizeof(uint64_t));
@@ -58,9 +72,14 @@ void MemTable::createSSTable(std::vector<SSTable *> &SSVec, std::string file_pat
 
 }
 
+/**
+ * @brief Add <key, val> to MemTable.
+ * @param key uint64_t type.
+ * @param val std::string type.
+ */
 void MemTable::put(uint64_t key, const std::string &val)
 {
-    
+
     MemNode *p = head;
     MemNode *update[MAX_LEVEL];
     for (int i = 0; i < MAX_LEVEL; ++i) update[i] = NULL;
@@ -86,13 +105,18 @@ void MemTable::put(uint64_t key, const std::string &val)
             newNode->forwards[i] = update[i]->forwards[i];
             update[i]->forwards[i] = newNode;
         }
-        minKey = key < minKey ? key : minKey;
-        maxKey = key > maxKey ? key : maxKey;
-        byteSize += 12 + val.length() + 1;
-        NumOfMemNode++;
+        minKey = key < minKey ? key : minKey;           //update minKey
+        maxKey = key > maxKey ? key : maxKey;           //update maxKey
+        byteSize += 12 + val.length();                  //update bytesize
+        NumOfMemNode++;                                 //update NumOfMemNode
     }
 }
 
+/**
+ * @brief Get value in <key, val>
+ * @param key uint64_t type
+ * @return "" if not exsits or has already been deleted; val else.
+ */
 std::string MemTable::get(uint64_t key)
 {
     MemNode *p = head;
@@ -101,13 +125,20 @@ std::string MemTable::get(uint64_t key)
             p = p->forwards[i];
         }
     }
-    
+
+    /* If found in MemTable and the node has not been deleted */
     if (p->forwards[0]->key == key && p->forwards[0]->val != "~DELETE~") {
         return p->forwards[0]->val;
     }
+    /* Else return false */
     else return "";
 }
 
+/**
+ * @brief delete node of which key is @param key
+ * @param key uint64_t type
+ * @return True: if the node exists in MemTable. False: Not Found or has been deleted.
+ */
 bool MemTable::del(uint64_t key)
 {
     MemNode *p = head;
@@ -117,14 +148,20 @@ bool MemTable::del(uint64_t key)
         }
     }
     p = p->forwards[0];
+
+    /* The node having key @param key is found and has not been deleted */
     if (p->key == key && p->val != "~DELETE~") {
         byteSize += 8 - p->val.length();            //update byteSize
         p->val = "~DELETE~";
         return true;
     }
+    /* Else return false */
     else return false;
 }
 
+/**
+ * @brief ReInitialize the MemTable
+ */
 void MemTable::reset()
 {
     /* Make MemTable empty */
@@ -141,6 +178,14 @@ void MemTable::reset()
         head->forwards[i] = tail;
 }
 
+/**
+* Return a list including all the key-value pair between key1 and key2.
+* keys in the list should be in an ascending order.
+* An empty string indicates not found.
+ * @param key1 lower bound of keys to search
+ * @param key2 upper bound of keys to search
+ * @param list the array for key-value pairs
+*/
 void MemTable::scan(uint64_t key1, uint64_t key2, std::list<std::pair<uint64_t, std::string>> &list)
 {
     MemNode *p = head;
@@ -157,6 +202,9 @@ void MemTable::scan(uint64_t key1, uint64_t key2, std::list<std::pair<uint64_t, 
     }
 }
 
+/**
+ * @brief Delete the MemTable and release its memory space
+ */
 void MemTable::deleteTable()
 {
     /* Make MemTable empty */

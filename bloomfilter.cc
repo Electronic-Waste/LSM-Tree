@@ -9,6 +9,12 @@ BloomFilter::BloomFilter()
         data[i] = '0';
 }
 
+BloomFilter::BloomFilter(char *bf)
+{
+    data = new char[CAPACITY];
+    strcpy(data, bf);
+}
+
 BloomFilter::~BloomFilter()
 {
     delete data;
@@ -18,7 +24,7 @@ void BloomFilter::insert(uint64_t key)
 {
     unsigned int hash[4] = {0};
     MurmurHash3_x64_128(&key, sizeof(uint64_t), 1, hash);
-    for (int i = 0; i < 4; ++i) 
+    for (int i = 0; i < 4; ++i)
         data[hash[i] % CAPACITY] = '1';
 }
 

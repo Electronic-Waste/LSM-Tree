@@ -5,6 +5,50 @@
 #include "utils.h"
 
 /**
+ * @brief Load SSTable to cache.
+ * @param path the file path of SSTable
+ */
+SSTable::SSTable(const std::string &path)
+{
+    /* Define some variables used in this function */
+    char timeStamp[8];
+    char num[8];
+    char minKey[8];
+    char maxKey[8];
+    char buf[CAPACITY];
+    char key[8];
+    char offset[4];
+    uint64_t _timeStamp;
+    uint64_t  _num;
+    uint64_t  _minKey;
+    uint64_t  _maxKey;
+    uint64_t _key;
+    uint32_t _offset;
+
+    /* Load header, bloomfilter, dic from disk */
+    std::ifstream out(path);
+    out.read(timeStamp, 8);
+    out.read(num, 8);
+    out.read(minKey, 8);
+    out.read(maxKey, 8);
+    out.read(buf, CAPACITY);
+    _timeStamp = * (uint64_t *) timeStamp;
+    _num = * (uint64_t *) num;
+    _minKey = * (uint64_t *) minKey;
+    _maxKey = * (uint64_t *) maxKey;
+    header = new SSInfo(_timeStamp, _num, _minKey, _maxKey);
+    bf = new BloomFilter(buf);
+    for (int i = 0; i < _num; ++i) {
+        out.read(key, 8);
+        out.read(offset, 4);
+        _key = * (uint64_t *) key;
+        _offset = * (uint32_t *) offset;
+        dic.push_back(std::pair<uint64_t, uint32_t>(_key, _offset));
+    }
+
+}
+
+/**
  * Get value string according to key
  * @param key key to be searched.
  * @return value string if found, "" else.
@@ -45,7 +89,7 @@ std::string SSTable::get(uint64_t key)
         out.close();
         /* the value is "~DELETE~", return "" */
         if (strcmp(buf, "~DELETE~") == 0) return "";
-            /* return value string */
+        /* return value string */
         else {
             std::string retStr(buf);
             return retStr;
@@ -97,6 +141,25 @@ void SSTable::reset()
     utils::rmfile(file_path.c_str());
 }
 
+SSInfo *SSTable::returnHeader()
+{
+    uint64_t timeStamp = header->timeStamp;
+    uint64_t  size = header->size;
+    uint64_t minKey = header->minKey;
+    uint64_t  maxKey = header->maxKey;
+    SSInfo *h = new SSInfo(timeStamp, size, minKey, maxKey);
+    return h;
+}
+
 /**
- * @brief Scan from K1 to K2
+ * @brief Copy this.dic to d
+ * @param d Array which we copy this.dic to
  */
+void SSTable::getDicKey(std::vector<uint64_t> &dk)
+{
+    uint64_t dicSize = dic.size();
+    for (int i = 0; i < dicSize; ++i) {
+        uint64_t key = dic[i].first;
+        dk.push_back(key);
+    }
+}
