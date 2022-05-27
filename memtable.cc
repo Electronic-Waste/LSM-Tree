@@ -1,6 +1,6 @@
 #include <iostream>
 #include <fstream>
-
+#include <cstring>
 #include "memtable.h"
 
 /**
@@ -35,7 +35,7 @@ int MemTable::randomLevel()
 void MemTable::createSSTable(std::vector<SSTable *> &SSVec, uint64_t timeStamp, const std::string &filePath)
 {
      /* Initialize some variables used for generating cache and SSTable */
-    uint32_t offset = 10240 + 32;
+    uint32_t offset = 10240 + 32 + 12 * NumOfMemNode;
     SSInfo *header = new SSInfo(timeStamp, NumOfMemNode, minKey, maxKey);
     BloomFilter *bf = new BloomFilter;
     std::vector<std::pair<uint64_t, uint32_t>> dic;
@@ -59,17 +59,28 @@ void MemTable::createSSTable(std::vector<SSTable *> &SSVec, uint64_t timeStamp, 
     /* Write SSTable to disk */
     std::ofstream in;
     in.open(file_path, std::ios::out | std::ios::binary);
-    in.write((char *)&timeStamp, sizeof(uint64_t));
-    in.write((char *)&NumOfMemNode, sizeof(uint64_t));
-    in.write((char *)&minKey, sizeof(uint64_t));
-    in.write((char *)&maxKey, sizeof(uint64_t));
-    in.write(bf->returnData(), CAPACITY);
+    in.write((char *)header, 32);
+    char *tmp = bf->returnData();
+    in.write(tmp, CAPACITY);
+    delete[] tmp;
+    /* Dictionary part */
+    int dicSize = dic.size();
+    for (int i = 0; i < dicSize; ++i) {
+        in.write((char *) &dic[i].first, 8);
+        in.write((char *) &dic[i].second, 4);
+    }
+    /* Value part */
     MemNode *q = head->forwards[0];
+    uint64_t totalLength = 0;
+    char *buf = new char[2100000];
     while (q->type != MemNodeType::NIL) {
-        in.write(q->val.c_str(), q->val.length());
+        uint64_t length = q->val.length();
+        strcat(buf, q->val.c_str());
+        totalLength += length;
         q = q->forwards[0];
     }
-
+    in.write(buf, totalLength);
+    delete[] buf;
 }
 
 /**
@@ -93,7 +104,7 @@ void MemTable::put(uint64_t key, const std::string &val)
     p = p->forwards[0];
 
     /* same value, change the val */
-    if (p->key == key) {
+    if (p->key == key && p->val != val) {
         byteSize += val.length() - p->val.length();     //update byteSize
         p->val = val;
     }
@@ -215,4 +226,27 @@ void MemTable::deleteTable()
         delete p1;
         p1 = p2;
     }
+}
+
+/**
+ * @details This is designed to fix the bug in get(key) that appears in delete().
+ *          If the k-v pair is deleted in memtable, the get function will simply return "", which will make delete() continue to run.
+ * @brief Judge whether the key is deleted in memtable or not.
+ * @param key
+ * @return true: if deleted; false: else.
+ */
+bool MemTable::isDeleted(uint64_t key)
+{
+    /* Search for key */
+    MemNode *p = head;
+    for (int i = MAX_LEVEL - 1; i >= 0; --i) {
+        while (p->forwards[i]->key < key) {
+            p = p->forwards[i];
+        }
+    }
+    p = p->forwards[0];
+
+    /* Judge if p->val equals to "~DELETE~" */
+    if (p->key == key && p->val == "~DELETE~") return true;
+    else return false;
 }

@@ -1,6 +1,3 @@
-#ifndef LSM_TREE_KVSTORE_H
-#define LSM_TREE_KVSTORE_H
-
 
 #pragma once
 
@@ -93,5 +90,3 @@ public:
 };
 
 
-
-#endif //LSM_TREE_KVSTORE_H

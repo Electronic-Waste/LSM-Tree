@@ -17,22 +17,30 @@ KVStore::KVStore(const std::string &dir): KVStoreAPI(dir)
         utils::mkdir(dir.c_str());
 
     /* If "dir/Level0" exists, load SSTables from disk to generate cache, and set maxTimeStamp */
-    if (utils::dirExists(dir + "/Level0")) {
+    int currentLevel = 0;
+    std::string dirPath = dir + "/Level0";
+    if (utils::dirExists(dirPath)) {
+        maxTimeStamp = 0;
         SSVec.clear();
         std::vector<std::string> fileVec;
-        int levelNum = 0;
-        std::string path = dir + "/Level" + std::to_string(levelNum);
         /* Enter directories and load SSTables to cache */
-        while (utils::dirExists(path)) {
-            utils::scanDir(path, fileVec);
+        while (utils::dirExists(dirPath)) {
+            utils::scanDir(dirPath, fileVec);
             uint64_t size = fileVec.size();
             /* Load every SSTables in this dir to cache */
             for (int i = 0; i < size; ++i) {
-                SSTable *st = new SSTable(path);
+                std::string filePath = dirPath + "/" + fileVec[i];
+                SSTable *st = new SSTable(filePath);
                 SSVec.push_back(st);
+                /* Set maxTimeStamp */
+                SSInfo *h = st->returnHeader();
+                if (h->timeStamp >= maxTimeStamp)
+                    maxTimeStamp = h->timeStamp + 1;
             }
             /* Update dir path */
-            path = dir + "/Level" + std::to_string(++levelNum);
+            dirPath = dir + "/Level" + std::to_string(++currentLevel);
+            /* Clear fileVec */
+            fileVec.clear();
         }
     }
     /* Else just set TimeStamp to 1 */
@@ -43,14 +51,17 @@ KVStore::KVStore(const std::string &dir): KVStoreAPI(dir)
 
 KVStore::~KVStore()
 {
-
+    std::string dirPath = dataDir + "/Level0";
+    std::string path = dirPath + "/sstable" + std::to_string(maxTimeStamp) + ".sst";
+    mem->createSSTable(SSVec, maxTimeStamp++, path);
+    if (isToCompact()) compact();
 }
 
 /**
  * @brief If inserting <key, str>, the MemTable will overflow or not?
  * @param key Inserted pair's key
  * @param str Inserted pair's key
- * @return
+ * @return true: will overflow; false: will not overflow.
  */
 bool KVStore::isOverflow(uint64_t key, const std::string &str)
 {
@@ -106,6 +117,7 @@ void KVStore::compact()
             int SSVecSize = SSVec.size();
             if (currentLevel == 0) {
                 for (int i = 0; i < currentFilesNum; ++i) {
+                    fileVec[i] = dirPath + "/" + fileVec[i];
                     std::string p1 = fileVec[i];
                     for (int j = 0 ; j < SSVecSize; ++j) {
                         std::string p2 = SSVec[j]->returnPath();
@@ -116,11 +128,12 @@ void KVStore::compact()
             /* Else select (2 ^ (currentLevel + 1) - maxFilesNum) files and insert them into compactVec.
              * Those files have minimum timeStamp in the current directories */
             else {
-                int compactFileNum = maxFilesNum - currentFilesNum;
+                int compactFileNum = currentFilesNum - maxFilesNum;
                 int SSVecSize = SSVec.size();
                 std::vector<SSTable *> fileSSVec;               //Corresponding cache for path in fileVec
                 /* Add corresponding cache to fileSSVec (using the path in fileVec) */
                 for (int i = 0; i < currentFilesNum; ++i) {
+                    fileVec[i] = dirPath + "/" + fileVec[i];
                     std::string p1 = fileVec[i];
                     for (int j = 0 ; j < SSVecSize; ++j) {
                         std::string p2 = SSVec[j]->returnPath();
@@ -130,8 +143,18 @@ void KVStore::compact()
                 /* Sort fileSSVec from small to big according to timeStamp */
                 for (int i = 1; i < currentFilesNum; ++i) {
                     for (int j = 0; j < currentFilesNum - i; ++j) {
+                        /* Select according to timeStamp */
                         if (fileSSVec[j+1]->returnHeader()->timeStamp
                                 < fileSSVec[j]->returnHeader()->timeStamp)
+                        {
+                            SSTable *tmp;
+                            tmp = fileSSVec[j];
+                            fileSSVec[j] = fileSSVec[j+1];
+                            fileSSVec[j+1] = tmp;
+                        }
+                        /* If timestamp is equal, select SSTable that has smaller minKey */
+                        else if (fileSSVec[j+1]->returnHeader()->timeStamp == fileSSVec[j]->returnHeader()->timeStamp
+                                    && fileSSVec[j+1]->returnHeader()->minKey < fileSSVec[j]->returnHeader()->minKey)
                         {
                             SSTable *tmp;
                             tmp = fileSSVec[j];
@@ -147,7 +170,7 @@ void KVStore::compact()
             }
 
             /********* Start to compact files into next level **************/
-            std::string nextDirPath = dataDir + "/Level" + std::to_string(++currentLevel);
+            std::string nextDirPath = dataDir + "/Level" + std::to_string(currentLevel + 1);
             std::vector<std::string> nextFileVec;
             std::vector<SSTable *> nextFileSSVec;
             std::vector<KVArray *> KVArrayVec;
@@ -169,12 +192,13 @@ void KVStore::compact()
                     uint64_t SSVecSize = SSVec.size();
                     for (int j = 0; j < SSVecSize; ++j) {
                         if (deleteFilePath == SSVec[j]->returnPath()) {
-                            SSVec[j]->reset();
+                            SSVec[j]->reset();                          // delete files and deallocate memory in cache
                             SSVec.erase(SSVec.begin() + j);
                             break;
                         }
                     }
                 }
+
                 /* Combine K-Way K-V pair arrays. Write the result into a MemTable and generate SSTable. */
                 kwayCombine(KVArrayVec, nextDirPath);
 
@@ -201,7 +225,7 @@ void KVStore::compact()
                     for (int j = 0; j < SSVecSize; ++j) {
                         SSInfo *header = SSVec[j]->returnHeader();
                         std::string p2 = SSVec[j]->returnPath();
-                        if (p1 == p2 && (minKey < header->minKey || maxKey > header->maxKey))
+                        if (p1 == p2 && !((header->minKey < minKey && header->maxKey < minKey) || (header->minKey > maxKey && header->maxKey > maxKey)))
                             compactSSVec.push_back(SSVec[j]);
                     }
                 }
@@ -218,7 +242,7 @@ void KVStore::compact()
                     uint64_t SSVecSize = SSVec.size();
                     for (int j = 0; j < SSVecSize; ++j) {
                         if (deleteFilePath == SSVec[j]->returnPath()) {
-                            SSVec[j]->reset();
+                            SSVec[j]->reset();                          // delete files and deallocate memory in cache
                             SSVec.erase(SSVec.begin() + j);
                             break;
                         }
@@ -248,18 +272,17 @@ void KVStore::compact()
 
 /**
  * @brief Combine K-Way K-V pair arrays. Write the result into a MemTable and generate SSTable.
- * @param Arr KWayNode *
+ * @param Arr Combine source (The Vector that we store our KVArray in)
  * @param dirPath The dir path that we write SSTable into
  */
 void KVStore::kwayCombine(std::vector<KVArray *> &Arr, const std::string &dirPath)
 {
     bool isContinue = true;
     int KVArraysNum = Arr.size();
-    std::vector<KWayNode *> KVec;       //K-Way combination's buffer
-    std::vector<int> eraseIndex;        //The element index in KVec (KVec[index] need to be deleted)
-    std::vector<int> updateIndex;       //The element index in KVArrayVec(Arr). We need to pull Arr[index]->KVCache[cachePos] into the buffer.
+    std::vector<KWayNode *> KWayBuf;    //K-Way combination's buffer
     uint64_t KVTimeStamp = 0;           //Max timeStamp in all KVArrays
     MemTable *m = new MemTable;         //For generate SSTable
+
     /* Get the max timeStamp in all KVArrays */
     uint64_t arrSize = Arr.size();
     for (int i = 0; i < arrSize; ++i) {
@@ -270,72 +293,68 @@ void KVStore::kwayCombine(std::vector<KVArray *> &Arr, const std::string &dirPat
     for (int i = 0; i < KVArraysNum; ++i) {
         uint64_t index = Arr[i]->cachePos;
         KWayNode *node = new KWayNode(i, Arr[i]->timeStamp, Arr[i]->KVCache[index]);
-        KVec.push_back(node);
-        ++Arr[i]->cachePos;
+        KWayBuf.push_back(node);
     }
     /* K-Way Combine */
     while (isContinue){
         isContinue = false;
-        int KWayArrSize = KVec.size();
+        int KWayBufSize = KWayBuf.size();
         /********** Bubble Sort *************/
-        for (int i = 1; i < KWayArrSize; ++i) {
-            for (int j = 0; j < KWayArrSize - i; ++j) {
-                if (KVec[j]->KVNode.first > KVec[j+1]->KVNode.first) {
-                    KWayNode *tmp = KVec[j];
-                    KVec[j] = KVec[j+1];
-                    KVec[j+1] = tmp;
+        for (int i = 1; i < KWayBufSize; ++i) {
+            for (int j = 0; j < KWayBufSize - i; ++j) {
+                if (KWayBuf[j]->KVNode.first > KWayBuf[j+1]->KVNode.first) {
+                    KWayNode *tmp = KWayBuf[j];
+                    KWayBuf[j] = KWayBuf[j+1];
+                    KWayBuf[j+1] = tmp;
                 }
             }
         }
-        /******* Deal with the newly sorted KVec (buffer for K-Way Combination) *********/
-        uint64_t minKey;
-        std::string valForMinKey;
-        /* Get those which have the same key into the eraseVec */
-        for (int i = 0; i < KWayArrSize; ++i) {
-            uint64_t key1 = KVec[i]->KVNode.first;
-            uint64_t stamp1 = KVec[i]->timeStamp;
-            int reserveIndex = i;
-            int j;
-            /* Search behind */
-            for (j = i + 1; j < KWayArrSize; ++j) {
-                /* Not found, break */
-                if (KVec[j]->KVNode.first != key1) break;
-                /* If the latter one has bigger timestamp, then update reserveIndex */
-                else if (KVec[j]->timeStamp > stamp1) reserveIndex = j;
+
+        /******* Deal with the KWayBuf which was newly sorted (buffer for K-Way Combination) *********/
+        std::vector<uint64_t> updateVec;                    // Index in KWayBuf to be updated
+        uint64_t minKey = KWayBuf[0]->KVNode.first;         // Min key in KWayBuf
+        uint64_t selectTimeStamp = 0;                       // Max timeStamp in the first few KWayNodes
+        uint64_t reserveIndex = 0;                          // The Index of KWayNode that is reserved
+
+        /* Determine which KWayNode is to be updated and Store their index in updateVec */
+        for (uint64_t i = 0; i < KWayBufSize; ++i) {
+            /* The nodes have same key with the first KWayNode */
+            if (KWayBuf[i]->KVNode.first == minKey) {
+                updateVec.push_back(i);
+                /* Check timeStamp and update reserveIndex and maxTimeStamp(selectTimeStamp) */
+                if (KWayBuf[i]->timeStamp > selectTimeStamp) {
+                    reserveIndex = i;
+                    selectTimeStamp = KWayBuf[i]->timeStamp;
+                }
             }
-            /* Push index into the eraseVec except reserveIndex */
-            for (int k = i; k < j; ++k) {
-                if (k != reserveIndex) eraseIndex.push_back(k);
+            /* Else break */
+            else break;
+        }
+
+        /* Store key and value of the element which has minimum element */
+        minKey = KWayBuf[reserveIndex]->KVNode.first;                                   // key of the minimum element
+        std::string valForMinKey = KWayBuf[reserveIndex]->KVNode.second;                   // value of the minimum element
+
+        /* Update KWayNode having index in updateVec */
+        uint64_t updateVecSize = updateVec.size();
+        for (uint64_t i = 0 ; i< updateVecSize; ++i) {
+            uint64_t arrIndex = KWayBuf[updateVec[i]]->KWayArrayIndex;
+            uint64_t KVCachePos = ++Arr[arrIndex]->cachePos;           // Update current cachePos
+            /* If is to overflow: Set overflow flag to true (although it doesn't work in the following steps) */
+            if (KVCachePos >= Arr[arrIndex]->cacheSize) {
+                Arr[arrIndex]->isOverFlow = true;
             }
-            /* Update i */
-            i = j - 1;
-        }
-        /* Erase the elements that have their indexes in eraseVec. Update updateIndex array. */
-        int eraseNum = eraseIndex.size();
-        for (int i = 0; i < eraseNum; ++i) {
-            int index = eraseIndex[i];
-            updateIndex.push_back(KVec[index]->KWayArrayIndex);
-            KVec.erase(KVec.begin() + index);
-        }
-        /* Get the minimum k-v pair */
-        int minIndex = KVec[0]->KWayArrayIndex;
-        minKey = KVec[0]->KVNode.first;             // Get minKey!
-        valForMinKey = KVec[0]->KVNode.second;      // Get valForMinKey!
-        updateIndex.push_back(minIndex);            // Index KVec[0]->KwayArrayIndex in Arr(KWayArray Vec) needs to be updated too.
-        KVec.erase(KVec.begin());
-        /* Update KVec */
-        int updateSize = updateIndex.size();
-        for (int i = 0; i < updateSize; ++i) {
-            int index = updateIndex[i];
-            /* Overflow */
-            if (++Arr[index]->cachePos >= Arr[index]->cacheSize)
-                Arr[index]->isOverFlow = true;
-            /* Not Overflow: push new KWayNode into KVec */
+            /* Not to overflow: Push the next element into KWayBuf */
             else {
-                int pos = Arr[index]->cachePos;
-                KWayNode *node = new KWayNode(index, Arr[index]->timeStamp, Arr[index]->KVCache[pos]);
-                KVec.push_back(node);
+                KWayNode *kWayNode = new KWayNode(arrIndex, Arr[arrIndex]->timeStamp, Arr[arrIndex]->KVCache[KVCachePos]);
+                KWayBuf.push_back(kWayNode);
             }
+        }
+
+        /* Erase those KWayNode having index in updateVec */
+        for (int i = updateVecSize - 1; i >= 0; --i) {
+            delete KWayBuf[updateVec[i]];
+            KWayBuf.erase(KWayBuf.cbegin() + updateVec[i]);
         }
 
         /****** Insert the minimum K-V node into memtable (and generate cache, SSTable). ********/
@@ -344,9 +363,9 @@ void KVStore::kwayCombine(std::vector<KVArray *> &Arr, const std::string &dirPat
         int mSize = m->getByteSize();
         std::string pStr = m->get(minKey);
         /* Key not found or has been deleted */
-        if (pStr == "") isToOverflow = mSize + valForMinKey.length() + 12 > MAX_BYTE;                 //Insert a new MemNode
+        if (pStr == "") isToOverflow = (mSize + valForMinKey.length() + 12 > MAX_BYTE);                 //Insert a new MemNode
         /* Key found */
-        else isToOverflow =  mSize + valForMinKey.length() - pStr.length() > MAX_BYTE;      //Update the val of the original MemNode
+        else isToOverflow =  (mSize + valForMinKey.length() - pStr.length() > MAX_BYTE);      //Update the val of the original MemNode
         /* Insert K-V node, deal with overflow and create new cache for SSTable in disk */
         /* If is to overflow */
         if (isToOverflow) {
@@ -358,14 +377,10 @@ void KVStore::kwayCombine(std::vector<KVArray *> &Arr, const std::string &dirPat
         m->put(minKey, valForMinKey);
 
         /****** Judge if the loop is to an end *******/
-        if (!KVec.empty()) isContinue = true;
+        if (!KWayBuf.empty()) isContinue = true;
 
-        /******* Updating some vectors so that they won't affect the next iteration ********/
-        KVec.clear();
-        eraseIndex.clear();
-        updateIndex.clear();
     }
-    /* Write remaing node in m(MemTable) to the disk and create cache */
+    /* Write remaining nodes in m(MemTable) to the disk and create cache */
     std::string remainPath = dirPath + "/sstable" + std::to_string(maxTimeStamp++) + ".sst";
     m->createSSTable(SSVec, KVTimeStamp, remainPath);
     /* Deallocating Memory */
@@ -401,21 +416,30 @@ void KVStore::put(uint64_t key, const std::string &s)
  */
 std::string KVStore::get(uint64_t key)
 {
-    std::string getMemStr = mem->get(key);
-    /* Not found in mem or has been deleted in mem (Need to repair) */
-    if (getMemStr != "") {
-        return getMemStr;
-    }
+    std::string getMemStr;
+    /* Deleted in mem */
+    if (mem->isDeleted(key)) return "";
+    /* Not found in mem ( not deleted ) */
+    else if ((getMemStr = mem->get(key)) != "") return getMemStr;
     /* Search it in SSTables */
-    else {
+    else if (!SSVec.empty()){
         int size = SSVec.size();
+        std::string retStr = "";
+        uint64_t maxStamp = 0;
         for (int i = 0; i < size; ++i) {
-            std::string retStr;
-            if ((retStr = SSVec[i]->get(key)) != "")
-                return retStr;
+            std::string loopStr = SSVec[i]->get(key);
+            uint64_t timeStamp = SSVec[i]->returnHeader()->timeStamp;
+            if (loopStr == "~DELETE~" && timeStamp > maxStamp) {
+                retStr = "";
+                maxStamp = timeStamp;
+            }
+            else if (loopStr != "" && timeStamp > maxStamp) {
+                retStr = loopStr;
+                maxStamp = timeStamp;
+            }
         }
+        return retStr;
     }
-    /* Not found anywhere */
     return "";
 }
 /**
@@ -425,16 +449,19 @@ std::string KVStore::get(uint64_t key)
 bool KVStore::del(uint64_t key)
 {
     std::string getStr = mem->get(key);
-    /* Key not found In MemTable or has been deleted (buggy!!)*/
-    if (getStr != "")
+    /* Key is deleted in MemTable */
+    if (mem->isDeleted(key))
+        return false;
+    /* Key is found In MemTable */
+    else if (getStr != "")
         return mem->del(key);
     /* Search in SSTables */
-    else {
+    else if (!SSVec.empty()){
         int size = SSVec.size();
-        for (int i = 0; i < size; ++i) {
-            std::string retStr;
-            if ((retStr = SSVec[i]->get(key)) != "") {
-                put(key, retStr);
+        for (int i = size - 1; i >= 0; --i) {
+            std::string retStr = SSVec[i]->get(key);
+            if (retStr != "" && retStr != "~DELETE") {
+                put(key, "~DELETE~");
                 return true;
             }
         }
@@ -455,6 +482,8 @@ void KVStore::reset()
     for (uint64_t i = 0; i < size; ++i) {
         SSVec[i]->reset();
     }
+    /* Reset maxTimeStamp */
+    maxTimeStamp = 1;
     /* Delete the remaining empty directories */
     int level = 0;
     while (true) {
@@ -472,7 +501,72 @@ void KVStore::reset()
  */
 void KVStore::scan(uint64_t key1, uint64_t key2, std::list<std::pair<uint64_t, std::string> > &list)
 {
-    mem->scan(key1, key2, list);
+    /******* Part1: Scan MemTable and the result will be stored in list1 *******/
+    std::list<std::pair<uint64_t, std::string> > list1;
+    mem->scan(key1, key2, list1);
+    if (SSVec.empty()) {list = list1; return; }
+
+    /******* Part2: Scan SSTable and the result will be stored in list2 *******/
+    std::list<std::pair<uint64_t, std::string> > list2;
+
+    /* Initialize some variables and vectors for scan */
+    uint64_t SSVecSize = SSVec.size();
+    MemTable *SSMem = new MemTable;
+    std::vector<int> ScanIndexVec;
+
+    /* Select SSTable that is in the range [key1, key2]. Store their indexes in ScanIndexVec */
+    for (uint64_t i = 0; i < SSVecSize; ++i) {
+        SSInfo *header = SSVec[i]->returnHeader();
+        if (!(header->minKey < key1 && header->maxKey < key1
+        || header->minKey >= key2 && header->maxKey >= key2)) {
+            ScanIndexVec.push_back(i);
+        }
+    }
+
+    /* Load corresponding SSTable to memory, and write them to SkipList */
+    uint64_t scanSize = ScanIndexVec.size();
+    for (int i = 0 ; i < scanSize; ++i) {
+        KVArray *kv = new KVArray(SSVec[ScanIndexVec[i]], KVReadMode::RMDELETE);
+        int size = kv->cacheSize;
+        for (int j = 0; j < size; ++j) {
+            if (kv->KVCache[j].first < key1) continue;
+            else if (kv->KVCache[j].first > key2) break;
+            else SSMem->put(kv->KVCache[j].first, kv->KVCache[j].second);
+        }
+    }
+    SSMem->scan(key1, key2, list2);
+
+
+    /********* Part3: Combine list1 and list2 **********/
+    /* Two Way Combine */
+    while (!list1.empty() && !list2.empty()) {
+        std::pair<uint64_t, std::string> node1(list1.front().first, list1.front().second);
+        std::pair<uint64_t, std::string> node2(list2.front().first, list2.front().second);
+        /* key in list1 < key in list2, choose node1 */
+        if (node1.first < node2.first) {
+            list.push_back(std::pair<uint64_t, std::string>(node1.first, node1.second));
+            list1.pop_front();
+        }
+        /* key in list1 = key in list2, choose node1 (because node1 has bigger timestamp) */
+        else if (node1.first == node2.first) {
+            list.push_back(std::pair<uint64_t, std::string>(node1.first, node1.second));
+            list1.pop_front();
+            list2.pop_front();
+        }
+        /* key in list1 > key in list2, choose node2 */
+        else {
+            list.push_back(std::pair<uint64_t, std::string>(node2.first, node2.second));
+            list2.pop_front();
+        }
+    }
+    /* Add the remaining nodes to list */
+    std::list<std::pair<uint64_t, std::string> > &tmp = (list1.empty()) ? list2 : list1;
+    while (!tmp.empty()) {
+        list.push_back(std::pair<uint64_t, std::string>(tmp.front().first, tmp.front().second));
+        tmp.pop_front();
+    }
+
+
 }
 
 /**

@@ -11,13 +11,7 @@
 SSTable::SSTable(const std::string &path)
 {
     /* Define some variables used in this function */
-    char timeStamp[8];
-    char num[8];
-    char minKey[8];
-    char maxKey[8];
     char buf[CAPACITY];
-    char key[8];
-    char offset[4];
     uint64_t _timeStamp;
     uint64_t  _num;
     uint64_t  _minKey;
@@ -26,32 +20,27 @@ SSTable::SSTable(const std::string &path)
     uint32_t _offset;
 
     /* Load header, bloomfilter, dic from disk */
-    std::ifstream out(path);
-    out.read(timeStamp, 8);
-    out.read(num, 8);
-    out.read(minKey, 8);
-    out.read(maxKey, 8);
+    std::ifstream out(path, std::ios::in | std::ios::binary);
+    out.read((char *) &_timeStamp, 8);
+    out.read((char *) &_num, 8);
+    out.read((char *) &_minKey, 8);
+    out.read((char *) &_maxKey, 8);
     out.read(buf, CAPACITY);
-    _timeStamp = * (uint64_t *) timeStamp;
-    _num = * (uint64_t *) num;
-    _minKey = * (uint64_t *) minKey;
-    _maxKey = * (uint64_t *) maxKey;
     header = new SSInfo(_timeStamp, _num, _minKey, _maxKey);
     bf = new BloomFilter(buf);
     for (int i = 0; i < _num; ++i) {
-        out.read(key, 8);
-        out.read(offset, 4);
-        _key = * (uint64_t *) key;
-        _offset = * (uint32_t *) offset;
+        _key = _offset = 0;
+        out.read((char *) &_key, 8);
+        out.read((char *) &_offset, 4);
         dic.push_back(std::pair<uint64_t, uint32_t>(_key, _offset));
     }
-
+    file_path = path;
 }
 
 /**
  * Get value string according to key
  * @param key key to be searched.
- * @return value string if found, "" else.
+ * @return value string if found, "~DELETE" if deleted, "" else.
  */
 std::string SSTable::get(uint64_t key)
 {
@@ -72,9 +61,8 @@ std::string SSTable::get(uint64_t key)
         out.seekg(offset, out.beg);
         /* Value locate in the end of file */
         if (len == 0) {
-            uint32_t fileSize;
             out.seekg(0, out.end);
-            fileSize = out.tellg();
+            uint64_t fileSize = out.tellg();
             out.seekg(offset, out.beg);
             buf = new char[fileSize - offset + 1];
             out.read(buf, fileSize - offset);
@@ -87,11 +75,15 @@ std::string SSTable::get(uint64_t key)
             buf[len] = '\0';
         }
         out.close();
-        /* the value is "~DELETE~", return "" */
-        if (strcmp(buf, "~DELETE~") == 0) return "";
+        /* the value is "~DELETE~", return "~DELETE~" */
+        if (strcmp(buf, "~DELETE~") == 0) {
+            delete[] buf;
+            return "~DELETE~";
+        }
         /* return value string */
         else {
-            std::string retStr(buf);
+            std::string retStr = std::string(buf);
+            delete[] buf;
             return retStr;
         }
     }
@@ -106,10 +98,10 @@ std::string SSTable::get(uint64_t key)
  */
 bool SSTable::getOffSet(uint64_t key, uint32_t &offset, uint32_t &len)
 {
-    uint64_t sizeOfDic = dic.size();
-    uint64_t left, right, mid;
-    left = 0;
-    right = sizeOfDic - 1;
+    int sizeOfDic = dic.size();
+    int left = 0;
+    int right = sizeOfDic - 1;
+    int mid;
     /* Search: O(logn) */
     while (left <= right) {
         mid = (left + right) / 2;
@@ -153,7 +145,7 @@ SSInfo *SSTable::returnHeader()
 
 /**
  * @brief Copy this.dic to d
- * @param d Array which we copy this.dic to
+ * @param dk Array which we copy this.dic to
  */
 void SSTable::getDicKey(std::vector<uint64_t> &dk)
 {

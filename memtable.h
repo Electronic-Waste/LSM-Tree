@@ -1,5 +1,3 @@
-#ifndef LSM_TREE_MEMTABLE_H
-#define LSM_TREE_MEMTABLE_H
 
 #pragma once
 
@@ -75,7 +73,7 @@ public:
 
     void createSSTable(std::vector<SSTable *> &SSVec, uint64_t timeStamp, const std::string &filePath);
 
+    bool isDeleted(uint64_t key);
+
 };
 
-
-#endif //LSM_TREE_MEMTABLE_H

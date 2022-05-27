@@ -1,5 +1,3 @@
-#ifndef LSM_TREE_SSTABLE_H
-#define LSM_TREE_SSTABLE_H
 
 #pragma once
 #include <vector>
@@ -58,5 +56,3 @@ public:
 };
 
 
-
-#endif //LSM_TREE_SSTABLE_H

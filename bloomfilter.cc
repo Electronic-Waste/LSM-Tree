@@ -12,7 +12,8 @@ BloomFilter::BloomFilter()
 BloomFilter::BloomFilter(char *bf)
 {
     data = new char[CAPACITY];
-    strcpy(data, bf);
+    for (int i = 0; i < CAPACITY; ++i)
+        data[i] = bf[i];
 }
 
 BloomFilter::~BloomFilter()
@@ -43,7 +44,9 @@ bool BloomFilter::isFind(uint64_t key)
 
 char *BloomFilter::returnData()
 {
-    char *retData = new char[CAPACITY];
-    strncpy(retData, data, CAPACITY);
+    char *retData = new char[CAPACITY + 1];
+    retData[CAPACITY] = '\0';
+    for (int i = 0; i < CAPACITY; ++i)
+        retData[i] = data[i];
     return retData;
 }
